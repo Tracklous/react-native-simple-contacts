@@ -13,7 +13,7 @@
 
 @property NSMutableArray *contacts;
 
-- (void)prepareContacts;
+- (BOOL)prepareContacts;
 
 @end
 

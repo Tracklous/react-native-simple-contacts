@@ -18,11 +18,24 @@ RCT_EXPORT_METHOD(findContactByNumber:(NSString*) number resolver:(RCTPromiseRes
     resolve([NSNumber numberWithInteger: 1]);
 }
 
-RCT_EXPORT_METHOD(getContacts:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+RCT_EXPORT_METHOD(getContacts:(NSString*) timestamp resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
     ContactProvider *cp = [ContactProvider new];
-    [cp prepareContacts];
-    resolve([cp.contacts bv_jsonStringWithPrettyPrint:false]);
+    BOOL value = [cp prepareContacts];
+    if(value==NO)
+    {
+        NSDictionary *userInfo = @{
+                                   NSLocalizedDescriptionKey: NSLocalizedString(@"Operation was unsuccessful.", nil),
+                                   NSLocalizedFailureReasonErrorKey: NSLocalizedString(@"The operation timed out.", nil),
+                                   NSLocalizedRecoverySuggestionErrorKey: NSLocalizedString(@"Have you tried turning it off and on again?", nil)
+                                   };
+        NSError *error = [NSError errorWithDomain:@"NSHipsterErrorDomain"
+                                             code:201
+                                         userInfo:userInfo];
+        reject(@"201",@"permission denied", error);
+    }else{
+        resolve([cp.contacts bv_jsonStringWithPrettyPrint:false]);
+    }
 }
 
 @end
-  
+

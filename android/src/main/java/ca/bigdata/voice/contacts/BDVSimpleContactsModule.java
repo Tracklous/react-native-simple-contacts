@@ -1,11 +1,14 @@
 
 package ca.bigdata.voice.contacts;
 
-import android.app.Activity;
 import android.content.ContentResolver;
+import android.content.Context;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.Build;
 import android.provider.ContactsContract;
+import android.telephony.TelephonyManager;
+import android.text.TextUtils;
 import android.util.Log;
 
 import com.facebook.react.bridge.Promise;
@@ -16,6 +19,11 @@ import com.facebook.react.bridge.ReactMethod;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.Locale;
 
 public class BDVSimpleContactsModule extends ReactContextBaseJavaModule {
 
@@ -33,90 +41,95 @@ public class BDVSimpleContactsModule extends ReactContextBaseJavaModule {
         return "BDVSimpleContacts";
     }
 
+
     @ReactMethod
-    public void getContacts(final Promise promise) {
+    public void getContacts(final String timestamp, final Promise promise) {
         Log.d(TAG, "getContacts");
 
         Thread thread = new Thread() {
             @Override
             public void run() {
-                Activity ca = getCurrentActivity();
-                if (ca == null) {
+                Log.d(TAG, "thread started");
+                Context context = getReactApplicationContext();
+                if (context == null) {
                     promise.reject("1", "Null activity");
                     return;
                 }
-                ContentResolver cr = ca.getContentResolver();
+                //  ContentResolver cr = context.getContentResolver();
 
                 JSONArray jsonA = new JSONArray();
 
-                Cursor cursor = cr.query(
-                        ContactsContract.Contacts.CONTENT_URI,
-                        new String[]{
-                                ContactsContract.Contacts.DISPLAY_NAME,
-                                ContactsContract.Contacts.PHOTO_THUMBNAIL_URI,
-                                ContactsContract.Contacts._ID
-                        },
-                        null, null, null
-                );
+                String selection = null;
+                String[] selectionArgs = null;
+                ArrayList<String> uniqueNumber = new ArrayList<>();
+
+                String[] projectionToCheck = {ContactsContract.CommonDataKinds.Phone.CONTACT_ID, ContactsContract.CommonDataKinds.Phone._ID, ContactsContract.CommonDataKinds.Phone.RAW_CONTACT_ID, ContactsContract.CommonDataKinds.Phone.NUMBER, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.PHOTO_URI, ContactsContract.CommonDataKinds.Phone.STATUS};
+//                Cursor cursorToCheck = context.getContentResolver().query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, projectionToCheck, null, null, ContactsContract.Contacts.SORT_KEY_PRIMARY);
+                if (!TextUtils.isEmpty(timestamp)) {
+
+                    selection = ContactsContract.CommonDataKinds.Phone.CONTACT_LAST_UPDATED_TIMESTAMP + " >= " + timestamp;
+                    Log.d(TAG, "Selection is:- " + selection);
+
+                }
+                Cursor data = context.getContentResolver().query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, projectionToCheck, selection, selectionArgs, ContactsContract.Contacts.SORT_KEY_PRIMARY);
+                final int contactIdIndex = data.getColumnIndex(ContactsContract.CommonDataKinds.Phone.CONTACT_ID);
+                final int contactRawIdIndex = data.getColumnIndex(ContactsContract.CommonDataKinds.Phone.RAW_CONTACT_ID);
+                final int contactPhoneNumberIndex = data.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER);
+                final int contactPhotoIndex = data.getColumnIndex(ContactsContract.CommonDataKinds.Phone.PHOTO_URI);
+                final int contactNameIndex = data.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME);
+                final int rowIdIndex = data.getColumnIndex(ContactsContract.CommonDataKinds.Phone._ID);
                 try {
-                    while (cursor.moveToNext()) {
-                        String contactID = cursor.getString(
-                                cursor.getColumnIndex(ContactsContract.Contacts._ID)
+                    while (data.moveToNext()) {
+                        JSONObject json = new JSONObject();
+                        json.put(
+                                "key",
+                                "contact_" + data.getString(contactIdIndex) + "_" + data.getString(rowIdIndex)
+
                         );
-                        Cursor cursorPhone = ca.getContentResolver().query(
-                                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-                                new String[]{ContactsContract.CommonDataKinds.Phone.NUMBER},
-                                ContactsContract.CommonDataKinds.Phone.CONTACT_ID + " = ? AND " +
-                                        ContactsContract.CommonDataKinds.Phone.TYPE + " = " +
-                                        ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE,
-                                new String[]{contactID},
-                                null
+                        json.put(
+                                "name", data.getString(contactNameIndex)
+
                         );
-                        try {
-                            if (cursorPhone.moveToFirst()) {
-                                JSONObject json = new JSONObject();
-                                json.put(
-                                        "key",
-                                        "contact_" + contactID
-                                );
-                                json.put(
-                                        "name",
-                                        cursor.getString(
-                                                cursor.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME)
-                                        )
-                                );
-                                json.put(
-                                        "avatar",
-                                        cursor.getString(
-                                                cursor.getColumnIndex(
-                                                        ContactsContract.Contacts.PHOTO_THUMBNAIL_URI
-                                                )
-                                        )
-                                );
-                                json.put(
-                                        "number",
-                                        cursorPhone.getString(
-                                                cursorPhone.getColumnIndex(
-                                                        ContactsContract.CommonDataKinds.Phone.NUMBER
-                                                )
-                                        )
-                                );
-                                jsonA.put(json);
-                            }
-                        } catch (JSONException exc) {
-                            Log.e(TAG, exc.toString());
-                        } finally {
-                            cursorPhone.close();
+                        if (data.getString(contactPhotoIndex) != null) {
+                            json.put(
+                                    "avatar", data.getString(contactPhotoIndex)
+
+                            );
+                        }
+                        String value = data.getString(contactPhoneNumberIndex);
+                        String number = "";
+                        // String code = getCountryCode(ca) != null ? getCountryCode(ca) : checkCountryCodeFromIsoCode(ca, "");
+                        value = value.replaceAll(" ", "").replaceAll("-", "").replaceAll("\\p{P}", "").replaceAll("\\s+", "");
+                        number = value;
+
+                         if (value.startsWith("0")) {
+                             String countryName = Locale.getDefault().getCountry();
+                             number = value.substring(value.indexOf("0") + 1);
+                             number = countryName + "-" + number;
+                         }
+                         else if (!number.contains("+")) {
+                             String countryName = Locale.getDefault().getCountry();
+                             number = countryName + "-" + number;
+                         }
+                        json.put("number", number);
+
+                        if (!uniqueNumber.contains(number)){
+                            jsonA.put(json);
+                            uniqueNumber.add(number);
                         }
                     }
+
+                } catch (JSONException je) {
                 } finally {
-                    cursor.close();
+                    data.close();
                 }
+                Log.d("contacts", jsonA.toString());
                 promise.resolve(jsonA.toString());
             }
         };
         thread.start();
     }
+
 
     @ReactMethod
     public void getProfile(Promise promise) {
